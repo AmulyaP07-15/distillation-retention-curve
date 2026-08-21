@@ -1,0 +1,26 @@
+# Control task config: PPO expert -> behavioral cloning -> DAgger on LunarLander
+env_id: "LunarLander-v3"
+seed: 42
+
+# PPO expert
+expert_total_timesteps: 500000
+expert_eval_episodes: 20
+checkpoint_dir: "checkpoints/lunarlander"
+
+# Expert trajectory dataset
+data_dir: "data/lunarlander"
+num_expert_episodes_for_dataset: 5
+
+# Behavioral cloning student (small MLP policy)
+hidden_dim: 64
+bc_epochs: 20
+bc_batch_size: 256
+bc_learning_rate: 1.0e-3
+bc_eval_episodes: 20
+
+# DAgger
+dagger_iterations: 5
+dagger_episodes_per_iteration: 10
+dagger_eval_episodes: 20
+
+run_log: "runs/lunarlander_run_log.jsonl"

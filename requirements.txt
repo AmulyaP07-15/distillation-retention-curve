@@ -1,0 +1,11 @@
+torch>=2.1.0
+transformers>=4.40.0
+datasets>=2.18.0
+pynvml>=11.5.0
+pandas>=2.0.0
+pyarrow>=14.0.0
+pyyaml>=6.0
+pytest>=7.0.0
+tqdm>=4.66.0
+accelerate>=0.27.0
+bitsandbytes>=0.42.0

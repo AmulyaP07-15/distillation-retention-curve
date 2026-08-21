@@ -1,0 +1,38 @@
+# Model selection: all Qwen2.5 models share the same tokenizer/vocab
+teacher_model: "Qwen/Qwen2.5-7B-Instruct"
+student_model: "Qwen/Qwen2.5-0.5B-Instruct"
+
+# Distillation hyperparameters
+temperature: 2.0
+alpha: 0.3
+
+# Training
+batch_size: 4
+gradient_accumulation_steps: 4
+max_length: 512
+num_epochs: 3
+learning_rate: 2.0e-5
+warmup_steps: 100
+weight_decay: 0.01
+seed: 42
+
+# Dataset
+dataset_name: "tatsu-lab/alpaca"
+num_samples: 10000
+data_dir: "data"
+split_a_ratio: 0.5
+
+# Save only the top-k logits per token position to keep file sizes manageable
+top_k_logits: 1000
+
+# Number of split B rows to generate on for the capability (task accuracy) eval
+capability_eval_samples: 200
+
+# System
+num_gpus: 1
+device: "cuda"
+
+# Logging and checkpoints. Give each student/signal combo its own paths so
+# runs don't collide once you're running more than one of them.
+run_log: "runs/run_log.jsonl"
+checkpoint_dir: "checkpoints/logit/qwen0_5b"

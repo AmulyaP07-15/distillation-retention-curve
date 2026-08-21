@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# Generated data, checkpoints, and run logs, regenerable from the code + configs
+data/
+checkpoints/
+runs/
