@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import torch
 import torch.distributed as dist
@@ -27,9 +28,13 @@ class DistillationDataset(Dataset):
     def __getitem__(self, idx):
         row = self.teacher_df.iloc[idx]
 
+        # Parquet round-trips list-of-list columns as object-dtype numpy arrays
+        # (arrays of Python lists, not a real numeric array), so torch.tensor
+        # can't infer a dtype from them directly. np.asarray with an explicit
+        # dtype stacks the sublists into a proper 2D numeric array first.
         input_ids = torch.tensor(row["input_ids"], dtype=torch.long)
-        top_k_indices = torch.tensor(row["top_logit_indices"], dtype=torch.long)
-        top_k_values = torch.tensor(row["top_logit_values"], dtype=torch.float)
+        top_k_indices = torch.tensor(np.asarray(row["top_logit_indices"], dtype=np.int64), dtype=torch.long)
+        top_k_values = torch.tensor(np.asarray(row["top_logit_values"], dtype=np.float32), dtype=torch.float)
 
         # Shift one position left so label[i] is the token the model at position i predicts
         labels = torch.cat([input_ids[1:], torch.tensor([-100])])
