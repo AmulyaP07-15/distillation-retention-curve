@@ -9,6 +9,7 @@ def distillation_loss(
     labels: torch.Tensor,
     alpha: float,
     temperature: float,
+    mask: torch.Tensor = None,
 ) -> tuple:
     """
     Combine hard-label cross entropy with a sparse soft-target KL term.
@@ -26,6 +27,12 @@ def distillation_loss(
     top_k_indices  : (batch, seq, k)  teacher top-k token positions
     top_k_values   : (batch, seq, k)  teacher top-k logit values
     labels         : (batch, seq)     next-token hard labels (-100 to ignore)
+    mask           : (batch, seq)     True/1 for real positions, False/0 for padding.
+                     Batches with variable-length sequences pad top_k_values with a
+                     -1e9 sentinel, which softmaxes to a uniform distribution rather
+                     than a genuinely empty one, so without this mask those padded
+                     positions would quietly pollute the KL average with a nonzero,
+                     meaningless gradient. Omit only when the batch has no padding.
     """
 
     batch, seq, vocab = student_logits.shape
@@ -44,7 +51,13 @@ def distillation_loss(
     student_log_probs_full = F.log_softmax(flat_student / temperature, dim=-1)
     student_log_probs_at_top_k = student_log_probs_full.gather(-1, flat_top_k_indices)
 
-    kl = (teacher_probs * (teacher_log_probs - student_log_probs_at_top_k)).sum(dim=-1).mean()
+    kl_per_position = (teacher_probs * (teacher_log_probs - student_log_probs_at_top_k)).sum(dim=-1)
+
+    if mask is not None:
+        flat_mask = mask.view(-1).float()
+        kl = (kl_per_position * flat_mask).sum() / flat_mask.sum().clamp(min=1.0)
+    else:
+        kl = kl_per_position.mean()
 
     soft_loss = (temperature ** 2) * kl
 

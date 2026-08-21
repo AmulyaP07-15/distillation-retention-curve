@@ -28,13 +28,12 @@ class DistillationDataset(Dataset):
     def __getitem__(self, idx):
         row = self.teacher_df.iloc[idx]
 
-        # Parquet round-trips list-of-list columns as object-dtype numpy arrays
-        # (arrays of Python lists, not a real numeric array), so torch.tensor
-        # can't infer a dtype from them directly. np.asarray with an explicit
-        # dtype stacks the sublists into a proper 2D numeric array first.
+        # Parquet round-trips top_logit_indices/values as object-dtype arrays of
+        # shape (seq_len,), where each element is itself a (top_k,) array. np.stack
+        # builds the real (seq_len, top_k) numeric array torch.tensor needs.
         input_ids = torch.tensor(row["input_ids"], dtype=torch.long)
-        top_k_indices = torch.tensor(np.asarray(row["top_logit_indices"], dtype=np.int64), dtype=torch.long)
-        top_k_values = torch.tensor(np.asarray(row["top_logit_values"], dtype=np.float32), dtype=torch.float)
+        top_k_indices = torch.tensor(np.stack(row["top_logit_indices"]).astype(np.int64), dtype=torch.long)
+        top_k_values = torch.tensor(np.stack(row["top_logit_values"]).astype(np.float32), dtype=torch.float)
 
         # Shift one position left so label[i] is the token the model at position i predicts
         labels = torch.cat([input_ids[1:], torch.tensor([-100])])
@@ -55,6 +54,7 @@ def pad_batch(batch: list, pad_token_id: int) -> dict:
     all_top_k_indices = []
     all_top_k_values = []
     all_labels = []
+    all_position_mask = []
 
     for item in batch:
         seq_len = item["input_ids"].shape[0]
@@ -65,11 +65,18 @@ def pad_batch(batch: list, pad_token_id: int) -> dict:
         all_top_k_values.append(F.pad(item["top_k_values"], (0, 0, 0, pad_len), value=-1e9))
         all_labels.append(F.pad(item["labels"], (0, pad_len), value=-100))
 
+        # True for real token positions, False for padding, so the KL term in
+        # distillation_loss can exclude padded positions from its mean instead
+        # of averaging in the meaningless loss the -1e9 padding sentinel produces.
+        mask = torch.cat([torch.ones(seq_len, dtype=torch.bool), torch.zeros(pad_len, dtype=torch.bool)])
+        all_position_mask.append(mask)
+
     return {
         "input_ids": torch.stack(all_input_ids),
         "top_k_indices": torch.stack(all_top_k_indices),
         "top_k_values": torch.stack(all_top_k_values),
         "labels": torch.stack(all_labels),
+        "position_mask": torch.stack(all_position_mask),
     }
 
 
@@ -155,6 +162,7 @@ def train(rank: int, config: Config, world_size: int):
             top_k_indices = batch["top_k_indices"].to(device)
             top_k_values = batch["top_k_values"].to(device)
             labels = batch["labels"].to(device)
+            position_mask = batch["position_mask"].to(device)
 
             outputs = model(input_ids=input_ids)
             student_logits = outputs.logits
@@ -166,6 +174,7 @@ def train(rank: int, config: Config, world_size: int):
                 labels,
                 alpha=config.alpha,
                 temperature=config.temperature,
+                mask=position_mask,
             )
 
             scaled_loss = total_loss / config.gradient_accumulation_steps

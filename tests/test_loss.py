@@ -37,6 +37,57 @@ def test_alpha_one_ignores_teacher():
     assert abs(total.item() - hard.item()) < 1e-5, "With alpha=1, total loss should equal hard loss"
 
 
+def test_mask_excludes_padded_positions_from_kl():
+    """
+    Padded positions carry a -1e9 sentinel in top_k_values, which softmaxes to
+    a uniform (not empty) distribution. Without the mask, that pollutes the KL
+    average. With the mask, soft_loss should match computing the loss on just
+    the real, unpadded positions.
+    """
+    torch.manual_seed(0)
+    batch, real_seq, pad_seq, vocab, k = 2, 4, 3, 200, 20
+
+    real_student, real_top_k_indices, real_top_k_values, real_labels = make_inputs(
+        batch=batch, seq=real_seq, vocab=vocab, k=k
+    )
+
+    pad_student = torch.randn(batch, pad_seq, vocab)
+    pad_top_k_indices = torch.zeros(batch, pad_seq, k, dtype=torch.long)
+    pad_top_k_values = torch.full((batch, pad_seq, k), -1e9)
+    pad_labels = torch.full((batch, pad_seq), -100, dtype=torch.long)
+
+    padded_student = torch.cat([real_student.detach(), pad_student], dim=1).requires_grad_(True)
+    padded_top_k_indices = torch.cat([real_top_k_indices, pad_top_k_indices], dim=1)
+    padded_top_k_values = torch.cat([real_top_k_values, pad_top_k_values], dim=1)
+    padded_labels = torch.cat([real_labels, pad_labels], dim=1)
+
+    mask = torch.cat(
+        [torch.ones(batch, real_seq, dtype=torch.bool), torch.zeros(batch, pad_seq, dtype=torch.bool)],
+        dim=1,
+    )
+
+    _, _, soft_loss_masked = distillation_loss(
+        padded_student, padded_top_k_indices, padded_top_k_values, padded_labels,
+        alpha=0.0, temperature=2.0, mask=mask,
+    )
+    _, _, soft_loss_unpadded = distillation_loss(
+        real_student, real_top_k_indices, real_top_k_values, real_labels,
+        alpha=0.0, temperature=2.0,
+    )
+    _, _, soft_loss_unmasked = distillation_loss(
+        padded_student, padded_top_k_indices, padded_top_k_values, padded_labels,
+        alpha=0.0, temperature=2.0,
+    )
+
+    assert torch.isclose(soft_loss_masked, soft_loss_unpadded, atol=1e-4), (
+        "Masked loss on a padded batch should equal the loss computed on the unpadded batch alone"
+    )
+    assert not torch.isclose(soft_loss_unmasked, soft_loss_unpadded, atol=1e-4), (
+        "Sanity check: the unmasked loss should actually differ once padding is included, "
+        "otherwise this test isn't exercising anything"
+    )
+
+
 def test_t_squared_stabilizes_gradient():
     """
     The T-squared multiplier is what keeps the soft-target gradient from collapsing
