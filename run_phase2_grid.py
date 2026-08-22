@@ -66,10 +66,26 @@ def main():
         action="store_true",
         help="Only re-read existing run logs and rebuild the table, without training or re-evaluating",
     )
+    parser.add_argument(
+        "--skip-teacher",
+        action="store_true",
+        help="Skip the upfront teacher pass entirely (use existing data/ as-is, no hash check)",
+    )
     parser.add_argument("--out", default="runs/phase2_grid.csv", help="Where to write the aggregated table")
     args = parser.parse_args()
 
     from src.config import load_config
+    from src.teacher import ensure_teacher_pass
+
+    if not args.skip_teacher and not args.skip_training:
+        # All 6 configs share teacher_model/dataset_name/num_samples/split_a_ratio/
+        # seed/top_k_logits/max_length, so any one of them can build the shared
+        # dataset + teacher_logits.parquet that every cell below reads from. This
+        # runs Qwen2.5-7B-Instruct inference exactly once for the whole grid,
+        # instead of once per student/signal cell.
+        print("=== Building shared teacher data (once for the whole grid) ===")
+        teacher_config = load_config(GRID[0][2])
+        ensure_teacher_pass(teacher_config)
 
     rows = []
 

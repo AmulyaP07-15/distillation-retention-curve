@@ -7,7 +7,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.config import Config
-from src.dataset import load_manifest, load_split
+from src.dataset import build_and_save_splits, load_manifest, load_split, verify_manifest
 from src.prompts import format_text
 
 
@@ -92,3 +92,39 @@ def run_teacher_pass(config: Config):
         json.dump(existing_manifest, f, indent=2)
 
     print("Manifest updated.")
+
+
+def ensure_teacher_pass(config: Config, force: bool = False) -> dict:
+    """
+    Build the versioned dataset splits and run the (expensive) teacher
+    inference pass, but only if they don't already exist on disk. All
+    students distill from the same teacher on the same data (dataset,
+    num_samples, split_a_ratio, seed, top_k_logits, max_length are shared
+    across every config in config/students/), so this lets the grid runner
+    generate the teacher data once and have every student/signal cell
+    reuse it, instead of re-running Qwen2.5-7B-Instruct once per cell.
+    """
+    data_dir = Path(config.data_dir)
+    manifest_path = data_dir / "manifest.json"
+
+    if force or not manifest_path.exists():
+        print("Building dataset splits...")
+        build_and_save_splits(config)
+    else:
+        manifest = load_manifest(config.data_dir)
+        if not verify_manifest(manifest):
+            raise RuntimeError(
+                "Dataset files do not match their stored hashes. Pass force=True to regenerate them."
+            )
+        print("Dataset already exists and hashes check out.")
+
+    manifest = load_manifest(config.data_dir)
+    teacher_logits_path = manifest.get("teacher_logits", {}).get("path")
+
+    if force or not teacher_logits_path or not Path(teacher_logits_path).exists():
+        print("Running teacher inference pass...")
+        run_teacher_pass(config)
+    else:
+        print(f"Teacher logits already exist at {teacher_logits_path}, skipping teacher pass.")
+
+    return load_manifest(config.data_dir)
