@@ -3,6 +3,7 @@ import json
 import random
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from datasets import load_dataset
 
@@ -96,3 +97,41 @@ def verify_manifest(manifest: dict) -> bool:
 
 def load_split(manifest: dict, split_name: str) -> pd.DataFrame:
     return pd.read_parquet(manifest[split_name]["path"])
+
+
+# Columns in teacher_logits.parquet that hold one value per token position
+# (a flat sequence, e.g. token ids). Parquet round-trips these as a genuine
+# 1-D numpy array per row, which breaks "+" list concatenation (numpy
+# broadcasts elementwise instead of appending) even though torch.tensor(...)
+# handles them fine. Normalizing to a plain Python list makes both usages safe.
+TEACHER_SEQUENCE_COLUMNS = ["input_ids", "generated_ids"]
+
+# Columns that hold one small vector per token position (e.g. the top-k
+# logits at each position). Parquet round-trips these as an *object*-dtype
+# array of shape (seq_len,), where every element is itself a (top_k,) array,
+# not a true 2-D numeric array. torch.tensor(...) can't infer a dtype from
+# that directly. np.stack rebuilds the real (seq_len, top_k) array.
+TEACHER_PER_TOKEN_COLUMNS = {
+    "top_logit_indices": np.int64,
+    "top_logit_values": np.float32,
+}
+
+
+def load_teacher_logits(manifest: dict) -> pd.DataFrame:
+    """
+    Load teacher_logits.parquet and normalize every list/array column once,
+    at the read boundary, so every downstream reader (training datasets,
+    fidelity eval, sequence distillation) gets clean, consistently-typed
+    values and never has to know about parquet's round-trip quirks itself.
+    """
+    df = pd.read_parquet(manifest["teacher_logits"]["path"])
+
+    for col in TEACHER_SEQUENCE_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].apply(list)
+
+    for col, dtype in TEACHER_PER_TOKEN_COLUMNS.items():
+        if col in df.columns:
+            df[col] = df[col].apply(lambda cell, dtype=dtype: np.stack(cell).astype(dtype))
+
+    return df

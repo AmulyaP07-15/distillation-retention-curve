@@ -2,7 +2,6 @@ import json
 import os
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import torch
 import torch.distributed as dist
@@ -12,7 +11,8 @@ from torch.utils.data import DataLoader, Dataset, DistributedSampler
 from transformers import AutoModelForCausalLM, AutoTokenizer, get_linear_schedule_with_warmup
 
 from src.config import Config
-from src.dataset import load_manifest, load_split
+from src.dataset import load_manifest, load_split, load_teacher_logits
+from src.evaluator import row_top_k_tensors
 from src.loss import distillation_loss
 
 
@@ -28,12 +28,8 @@ class DistillationDataset(Dataset):
     def __getitem__(self, idx):
         row = self.teacher_df.iloc[idx]
 
-        # Parquet round-trips top_logit_indices/values as object-dtype arrays of
-        # shape (seq_len,), where each element is itself a (top_k,) array. np.stack
-        # builds the real (seq_len, top_k) numeric array torch.tensor needs.
         input_ids = torch.tensor(row["input_ids"], dtype=torch.long)
-        top_k_indices = torch.tensor(np.stack(row["top_logit_indices"]).astype(np.int64), dtype=torch.long)
-        top_k_values = torch.tensor(np.stack(row["top_logit_values"]).astype(np.float32), dtype=torch.float)
+        top_k_indices, top_k_values = row_top_k_tensors(row)
 
         # Shift one position left so label[i] is the token the model at position i predicts
         labels = torch.cat([input_ids[1:], torch.tensor([-100])])
@@ -102,7 +98,7 @@ def train(rank: int, config: Config, world_size: int):
     device = torch.device(f"cuda:{rank}") if use_ddp else torch.device(config.device)
 
     manifest = load_manifest(config.data_dir)
-    teacher_df = pd.read_parquet(manifest["teacher_logits"]["path"])
+    teacher_df = load_teacher_logits(manifest)
 
     if rank == 0:
         print(f"Loaded {len(teacher_df)} teacher rows from parquet")

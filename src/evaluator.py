@@ -10,7 +10,31 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.capability import compute_capability
 from src.config import Config
-from src.dataset import load_manifest, load_split
+from src.dataset import load_manifest, load_split, load_teacher_logits
+
+
+def pad_input_ids(batch_rows: list, pad_token_id: int) -> list:
+    """
+    row["input_ids"] comes back from parquet as a numpy array, not a Python
+    list, so "+" would do elementwise addition (and broadcast-error on
+    mismatched lengths) instead of concatenation. list(...) first fixes that.
+    """
+    max_len = max(len(row["input_ids"]) for row in batch_rows)
+    return [
+        list(row["input_ids"]) + [pad_token_id] * (max_len - len(row["input_ids"]))
+        for row in batch_rows
+    ]
+
+
+def row_top_k_tensors(row: dict) -> tuple:
+    """
+    A row's top_logit_indices/values is a parquet-round-tripped object array
+    of shape (seq_len,), where each element is itself a (top_k,) array.
+    np.stack turns that into the real 2D numeric array torch.tensor needs.
+    """
+    top_k_indices = torch.tensor(np.stack(row["top_logit_indices"]).astype(np.int64), dtype=torch.long)
+    top_k_values = torch.tensor(np.stack(row["top_logit_values"]).astype(np.float32), dtype=torch.float)
+    return top_k_indices, top_k_values
 
 
 def compute_fidelity(
@@ -37,11 +61,7 @@ def compute_fidelity(
     for batch_start in tqdm(range(0, len(rows), config.batch_size), desc="Fidelity eval"):
         batch_rows = rows[batch_start : batch_start + config.batch_size]
 
-        max_len = max(len(row["input_ids"]) for row in batch_rows)
-        padded_ids = [
-            row["input_ids"] + [tokenizer.pad_token_id] * (max_len - len(row["input_ids"]))
-            for row in batch_rows
-        ]
+        padded_ids = pad_input_ids(batch_rows, tokenizer.pad_token_id)
         input_tensor = torch.tensor(padded_ids, dtype=torch.long).to(device)
 
         with torch.no_grad():
@@ -53,8 +73,7 @@ def compute_fidelity(
 
             student_seq = student_logits[i, :seq_len]
 
-            top_k_indices = torch.tensor(row["top_logit_indices"], dtype=torch.long)
-            top_k_values = torch.tensor(row["top_logit_values"], dtype=torch.float)
+            top_k_indices, top_k_values = row_top_k_tensors(row)
 
             teacher_top1 = top_k_values.argmax(dim=-1)
             teacher_top1_tokens = top_k_indices.gather(-1, teacher_top1.unsqueeze(-1)).squeeze(-1)
@@ -80,7 +99,7 @@ def compute_fidelity(
 
 def run_eval(config: Config):
     manifest = load_manifest(config.data_dir)
-    teacher_df = pd.read_parquet(manifest["teacher_logits"]["path"])
+    teacher_df = load_teacher_logits(manifest)
 
     checkpoints = sorted(Path(config.checkpoint_dir).glob("epoch_*"))
     if not checkpoints:

@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -9,7 +8,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 from transformers import AutoModelForCausalLM, AutoTokenizer, get_linear_schedule_with_warmup
 
 from src.config import Config
-from src.dataset import load_manifest
+from src.dataset import load_manifest, load_teacher_logits
 from src.sequence_dataset import SequenceDistillationDataset, pad_sequence_batch
 from src.trainer import cleanup_ddp, setup_ddp
 
@@ -31,7 +30,7 @@ def train_sequence(rank: int, config: Config, world_size: int):
     device = torch.device(f"cuda:{rank}") if use_ddp else torch.device(config.device)
 
     manifest = load_manifest(config.data_dir)
-    teacher_df = pd.read_parquet(manifest["teacher_logits"]["path"])
+    teacher_df = load_teacher_logits(manifest)
 
     if rank == 0:
         print(f"Loaded {len(teacher_df)} teacher-generated rows for sequence distillation")
