@@ -20,6 +20,8 @@ def run_teacher_pass(config: Config):
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
 
     model = AutoModelForCausalLM.from_pretrained(
         config.teacher_model,
@@ -37,6 +39,12 @@ def run_teacher_pass(config: Config):
     for batch_start in tqdm(range(0, len(prompts), config.batch_size), desc="Teacher pass"):
         batch_prompts = prompts[batch_start : batch_start + config.batch_size]
 
+        # Right-padded encoding for the scoring forward pass. Every row's real
+        # tokens stay 0-indexed, matching the position_ids a plain model(...)
+        # call defaults to when none are passed, so batching doesn't shift the
+        # teacher's own logits. We only ever read back the first seq_len
+        # positions per row, so the pad tokens at the end are never touched.
+        tokenizer.padding_side = "right"
         encoded = tokenizer(
             batch_prompts,
             return_tensors="pt",
@@ -53,23 +61,47 @@ def run_teacher_pass(config: Config):
 
         top_values, top_indices = torch.topk(logits, k=config.top_k_logits, dim=-1)
 
+        # Left-padded encoding for generation. A decoder-only model generates
+        # from each row's last column, so with right-padding, every sequence
+        # shorter than the batch max would continue from a pad token instead
+        # of its real last token, corrupting the generated continuation (this
+        # is exactly the "right-padding was detected" warning). generate()
+        # derives position_ids from the attention mask internally, so left
+        # padding is safe here even though we avoid it for the scoring pass.
+        tokenizer.padding_side = "left"
+        gen_encoded = tokenizer(
+            batch_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=config.max_length,
+        )
+        gen_input_ids = gen_encoded["input_ids"].to(model.device)
+        gen_attention_mask = gen_encoded["attention_mask"].to(model.device)
+
         with torch.no_grad():
             generated = model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
+                input_ids=gen_input_ids,
+                attention_mask=gen_attention_mask,
                 max_new_tokens=128,
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id,
             )
 
+        gen_max_len = gen_input_ids.shape[1]
+
         for i in range(len(batch_prompts)):
             seq_len = int(attention_mask[i].sum().item())
+            # generate() keeps the left-padded prompt columns as-is and appends
+            # new tokens after them, so strip the same amount of leading pad
+            # before storing: what's left is [real prompt][generated tokens].
+            gen_pad_len = gen_max_len - seq_len
             record = {
                 "prompt_index": batch_start + i,
                 "input_ids": input_ids[i, :seq_len].cpu().tolist(),
                 "top_logit_values": top_values[i, :seq_len].cpu().tolist(),
                 "top_logit_indices": top_indices[i, :seq_len].cpu().tolist(),
-                "generated_ids": generated[i].cpu().tolist(),
+                "generated_ids": generated[i, gen_pad_len:].cpu().tolist(),
             }
             records.append(record)
 
