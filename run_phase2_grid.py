@@ -1,10 +1,18 @@
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pandas as pd
+
+# Reduces CUDA allocator fragmentation, which matters here since each cell
+# is its own subprocess loading a fresh model of a different size. Without
+# this, a smaller student's run can leave the allocator fragmented in a way
+# that makes the next, larger student harder to fit even with the same
+# amount of free memory.
+SUBPROCESS_ENV = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
 
 GRID = [
     ("qwen0_5b", "logit", "config/students/qwen0_5b_logit.yaml"),
@@ -44,15 +52,34 @@ def read_latest_eval(run_log_path: str) -> dict:
     }
 
 
+def run_teacher_step(teacher_config_path: str):
+    """
+    Build the shared dataset + teacher logits as a subprocess, not an
+    in-process function call. The teacher pass loads the full 7B model onto
+    the GPU, and running it as its own process guarantees the OS reclaims
+    that memory when the process exits, before any training cell's
+    subprocess starts. Calling ensure_teacher_pass() directly here instead
+    would leave the 7B model resident in this long-lived parent process for
+    the entire grid run, starving every cell of GPU memory regardless of
+    student size.
+    """
+    print("=== Building shared teacher data (once for the whole grid) ===")
+    subprocess.run(
+        [sys.executable, "run_teacher.py", "--config", teacher_config_path],
+        check=True,
+        env=SUBPROCESS_ENV,
+    )
+
+
 def run_cell(student: str, signal: str, config_path: str, skip_training: bool):
     train_script = TRAIN_SCRIPT_BY_SIGNAL[signal]
 
     if not skip_training:
         print(f"\n=== Training {student} / {signal} ===")
-        subprocess.run([sys.executable, train_script, "--config", config_path], check=True)
+        subprocess.run([sys.executable, train_script, "--config", config_path], check=True, env=SUBPROCESS_ENV)
 
     print(f"=== Evaluating {student} / {signal} ===")
-    subprocess.run([sys.executable, "run_eval.py", "--config", config_path], check=True)
+    subprocess.run([sys.executable, "run_eval.py", "--config", config_path], check=True, env=SUBPROCESS_ENV)
 
 
 def main():
@@ -75,7 +102,6 @@ def main():
     args = parser.parse_args()
 
     from src.config import load_config
-    from src.teacher import ensure_teacher_pass
 
     if not args.skip_teacher and not args.skip_training:
         # All 6 configs share teacher_model/dataset_name/num_samples/split_a_ratio/
@@ -83,9 +109,7 @@ def main():
         # dataset + teacher_logits.parquet that every cell below reads from. This
         # runs Qwen2.5-7B-Instruct inference exactly once for the whole grid,
         # instead of once per student/signal cell.
-        print("=== Building shared teacher data (once for the whole grid) ===")
-        teacher_config = load_config(GRID[0][2])
-        ensure_teacher_pass(teacher_config)
+        run_teacher_step(GRID[0][2])
 
     rows = []
 

@@ -1,3 +1,4 @@
+import gc
 import json
 from pathlib import Path
 
@@ -22,6 +23,9 @@ def run_teacher_pass(config: Config):
         tokenizer.pad_token = tokenizer.eos_token
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
+
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
 
     model = AutoModelForCausalLM.from_pretrained(
         config.teacher_model,
@@ -124,6 +128,19 @@ def run_teacher_pass(config: Config):
         json.dump(existing_manifest, f, indent=2)
 
     print("Manifest updated.")
+
+    if torch.cuda.is_available():
+        peak_gb = torch.cuda.max_memory_allocated() / 1e9
+        print(f"Teacher pass peak GPU memory: {peak_gb:.2f} GB")
+
+    # The grid runner now launches this as its own subprocess specifically so
+    # the OS reclaims all of this on exit, but run_teacher_pass is also called
+    # in-process (e.g. via ensure_teacher_pass from a notebook or a script
+    # that keeps running afterward), where nothing else would free this.
+    del model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def ensure_teacher_pass(config: Config, force: bool = False) -> dict:

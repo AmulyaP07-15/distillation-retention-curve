@@ -87,6 +87,24 @@ def cleanup_ddp():
     dist.destroy_process_group()
 
 
+def reset_peak_memory_stats(device: torch.device):
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+
+
+def log_peak_memory(device: torch.device, rank: int, run_log_path: Path):
+    """Report peak GPU memory for this run, so we know a given student/signal cell actually fits."""
+    if device.type != "cuda":
+        return
+
+    peak_gb = torch.cuda.max_memory_allocated(device) / 1e9
+
+    if rank == 0:
+        print(f"Peak GPU memory this run: {peak_gb:.2f} GB")
+        with open(run_log_path, "a") as f:
+            f.write(json.dumps({"peak_gpu_memory_gb": peak_gb}) + "\n")
+
+
 def train(rank: int, config: Config, world_size: int):
     use_ddp = world_size > 1
 
@@ -96,6 +114,7 @@ def train(rank: int, config: Config, world_size: int):
     torch.manual_seed(config.seed + rank)
 
     device = torch.device(f"cuda:{rank}") if use_ddp else torch.device(config.device)
+    reset_peak_memory_stats(device)
 
     manifest = load_manifest(config.data_dir)
     teacher_df = load_teacher_logits(manifest)
@@ -211,6 +230,8 @@ def train(rank: int, config: Config, world_size: int):
             underlying_model.save_pretrained(str(checkpoint_dir))
             tokenizer.save_pretrained(str(checkpoint_dir))
             print(f"Checkpoint saved: {checkpoint_dir}")
+
+    log_peak_memory(device, rank, run_log_path)
 
     if use_ddp:
         cleanup_ddp()
