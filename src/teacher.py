@@ -107,21 +107,44 @@ def ensure_teacher_pass(config: Config, force: bool = False) -> dict:
     data_dir = Path(config.data_dir)
     manifest_path = data_dir / "manifest.json"
 
-    if force or not manifest_path.exists():
-        print("Building dataset splits...")
-        build_and_save_splits(config)
-    else:
+    needs_split_rebuild = force or not manifest_path.exists()
+
+    if not needs_split_rebuild:
         manifest = load_manifest(config.data_dir)
-        if not verify_manifest(manifest):
+        stored_settings = manifest.get("config", {})
+        requested_settings = {
+            "dataset_name": config.dataset_name,
+            "num_samples": config.num_samples,
+            "split_a_ratio": config.split_a_ratio,
+            "seed": config.seed,
+        }
+
+        if stored_settings != requested_settings:
+            # A manifest that matches its own file hashes can still describe the
+            # wrong data, e.g. someone bumped num_samples in the config since it
+            # was built. Silently reusing it would eval every cell on the wrong
+            # dataset without any error, so treat a settings mismatch the same as
+            # missing data rather than only checking hash self-consistency.
+            print(
+                f"Existing manifest was built with different settings "
+                f"(stored={stored_settings}, requested={requested_settings}), rebuilding."
+            )
+            needs_split_rebuild = True
+        elif not verify_manifest(manifest):
             raise RuntimeError(
                 "Dataset files do not match their stored hashes. Pass force=True to regenerate them."
             )
-        print("Dataset already exists and hashes check out.")
+        else:
+            print("Dataset already exists, matches the requested settings, and hashes check out.")
+
+    if needs_split_rebuild:
+        print("Building dataset splits...")
+        build_and_save_splits(config)
 
     manifest = load_manifest(config.data_dir)
     teacher_logits_path = manifest.get("teacher_logits", {}).get("path")
 
-    if force or not teacher_logits_path or not Path(teacher_logits_path).exists():
+    if force or needs_split_rebuild or not teacher_logits_path or not Path(teacher_logits_path).exists():
         print("Running teacher inference pass...")
         run_teacher_pass(config)
     else:
