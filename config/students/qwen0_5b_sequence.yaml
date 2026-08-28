@@ -27,3 +27,4 @@ device: "cuda"
 
 run_log: "runs/qwen0_5b_sequence_run_log.jsonl"
 checkpoint_dir: "checkpoints/sequence/qwen0_5b"
+student_torch_dtype: "float32"

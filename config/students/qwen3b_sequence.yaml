@@ -31,3 +31,10 @@ device: "cuda"
 
 run_log: "runs/qwen3b_sequence_run_log.jsonl"
 checkpoint_dir: "checkpoints/sequence/qwen3b"
+
+# Same fp32 static-memory ceiling as qwen3b_logit.yaml applies here too:
+# weights + gradients + AdamW moments for a 3B model is ~48GB in fp32
+# regardless of batch_size or gradient checkpointing, since neither of
+# those touch anything but activation memory. bfloat16 halves it to ~24GB.
+# Requires the target GPU to support bf16 (A100 does, V100 does not).
+student_torch_dtype: "bfloat16"

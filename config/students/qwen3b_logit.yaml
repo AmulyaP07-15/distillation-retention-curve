@@ -7,9 +7,7 @@ alpha: 0.3
 
 # Already at batch_size 1, the floor, so there's no further room to trade
 # batch_size for gradient_accumulation_steps here (same situation as the 3B
-# sequence config). With the 1.5B logit cell already peaking at 32.63GB at
-# batch_size 2, this cell fitting relies on gradient checkpointing in the
-# logit trainer itself (src/trainer.py).
+# sequence config).
 batch_size: 1
 gradient_accumulation_steps: 16
 max_length: 512
@@ -32,3 +30,13 @@ device: "cuda"
 
 run_log: "runs/qwen3b_logit_run_log.jsonl"
 checkpoint_dir: "checkpoints/logit/qwen3b"
+
+# batch_size 1 + gradient checkpointing (in src/trainer.py) only bound
+# activation memory, but this cell OOM'd during AdamW init on a 40GB A100,
+# i.e. before any batch is even processed. That's fp32's static weight +
+# gradient + optimizer-state footprint for a 3B model: ~12GB weights + 12GB
+# gradients + 24GB AdamW moments = ~48GB, already over budget regardless of
+# batch size or activation memory. bfloat16 roughly halves all three, to
+# ~24GB, which is what actually fits this student on this card. Requires
+# the target GPU to support bf16 (A100 does, V100 does not).
+student_torch_dtype: "bfloat16"

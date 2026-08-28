@@ -26,6 +26,13 @@ class Config:
     device: str = "cuda"
     run_log: str = "runs/run_log.jsonl"
     checkpoint_dir: str = "checkpoints/logit/qwen0_5b"
+    # "float32" or "bfloat16". bfloat16 roughly halves weight + gradient +
+    # AdamW optimizer-state memory (all three scale with param count, not
+    # batch_size, so gradient checkpointing and a smaller batch don't touch
+    # them), but needs an Ampere-or-newer GPU (A100) for hardware support.
+    # V100 lacks native bf16 tensor cores, so leave smaller students on the
+    # float32 default unless you know the target GPU supports it.
+    student_torch_dtype: str = "float32"
 
 
 def load_config(config_path: str) -> Config:

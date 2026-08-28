@@ -87,6 +87,13 @@ def cleanup_ddp():
     dist.destroy_process_group()
 
 
+def resolve_torch_dtype(name: str) -> torch.dtype:
+    dtype = getattr(torch, name, None)
+    if not isinstance(dtype, torch.dtype):
+        raise ValueError(f"Unknown student_torch_dtype '{name}', expected e.g. 'float32' or 'bfloat16'")
+    return dtype
+
+
 def reset_peak_memory_stats(device: torch.device):
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -128,7 +135,7 @@ def train(rank: int, config: Config, world_size: int):
 
     model = AutoModelForCausalLM.from_pretrained(
         config.student_model,
-        torch_dtype=torch.float32,
+        torch_dtype=resolve_torch_dtype(config.student_torch_dtype),
     ).to(device)
 
     # Trades recompute for memory: only checkpoints are kept from the forward

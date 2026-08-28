@@ -10,7 +10,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, get_linear_schedul
 from src.config import Config
 from src.dataset import load_manifest, load_teacher_logits
 from src.sequence_dataset import SequenceDistillationDataset, pad_sequence_batch
-from src.trainer import cleanup_ddp, log_peak_memory, reset_peak_memory_stats, setup_ddp
+from src.trainer import cleanup_ddp, log_peak_memory, reset_peak_memory_stats, resolve_torch_dtype, setup_ddp
 
 
 def sequence_ce_loss(student_logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
@@ -42,7 +42,7 @@ def train_sequence(rank: int, config: Config, world_size: int):
 
     model = AutoModelForCausalLM.from_pretrained(
         config.student_model,
-        torch_dtype=torch.float32,
+        torch_dtype=resolve_torch_dtype(config.student_torch_dtype),
     ).to(device)
 
     # Trades recompute for memory: instead of keeping every layer's activations

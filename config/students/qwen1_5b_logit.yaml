@@ -32,3 +32,4 @@ device: "cuda"
 
 run_log: "runs/qwen1_5b_logit_run_log.jsonl"
 checkpoint_dir: "checkpoints/logit/qwen1_5b"
+student_torch_dtype: "float32"

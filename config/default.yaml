@@ -36,3 +36,9 @@ device: "cuda"
 # runs don't collide once you're running more than one of them.
 run_log: "runs/run_log.jsonl"
 checkpoint_dir: "checkpoints/logit/qwen0_5b"
+
+# "float32" or "bfloat16". Weight + gradient + AdamW optimizer-state memory
+# all scale with param count, not batch_size, so this is the lever for a
+# student too big to fit even at batch_size 1 with gradient checkpointing.
+# bfloat16 needs an Ampere-or-newer GPU (A100); V100 lacks native support.
+student_torch_dtype: "float32"
