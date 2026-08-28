@@ -31,7 +31,7 @@ def train_sequence(rank: int, config: Config, world_size: int):
     reset_peak_memory_stats(device)
 
     manifest = load_manifest(config.data_dir)
-    teacher_df = load_teacher_logits(manifest)
+    teacher_df = load_teacher_logits(manifest, include_per_token_columns=False)
 
     if rank == 0:
         print(f"Loaded {len(teacher_df)} teacher-generated rows for sequence distillation")
@@ -44,6 +44,16 @@ def train_sequence(rank: int, config: Config, world_size: int):
         config.student_model,
         torch_dtype=torch.float32,
     ).to(device)
+
+    # Trades recompute for memory: instead of keeping every layer's activations
+    # around for backward, only checkpoints are kept and the forward pass is
+    # replayed layer-by-layer during backward. This is what makes the 1.5B/3B
+    # sequence cells fit, since their full-vocab cross entropy (unlike the
+    # logit path's top-k-bounded KL) has no smaller activation footprint to
+    # fall back on. use_cache is a generation-time KV cache and doesn't help
+    # (or is even incompatible with) a training forward pass, so disable it.
+    model.gradient_checkpointing_enable()
+    model.config.use_cache = False
 
     if use_ddp:
         model = DDP(model, device_ids=[rank])

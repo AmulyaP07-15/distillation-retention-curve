@@ -5,8 +5,13 @@ student_model: "Qwen/Qwen2.5-1.5B-Instruct"
 temperature: 2.0
 alpha: 0.3
 
-batch_size: 2
-gradient_accumulation_steps: 8
+# Sequence-level distillation's loss is a full-vocab cross entropy with no
+# top-k bound, so it OOMs at a larger batch_size than the logit path does
+# on the same student. Lower batch_size, higher gradient_accumulation_steps
+# keeps the effective batch size (16) the same while cutting peak memory.
+# Paired with gradient checkpointing in the sequence trainer itself.
+batch_size: 1
+gradient_accumulation_steps: 16
 max_length: 512
 num_epochs: 3
 learning_rate: 2.0e-5

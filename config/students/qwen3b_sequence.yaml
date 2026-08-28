@@ -5,6 +5,10 @@ student_model: "Qwen/Qwen2.5-3B-Instruct"
 temperature: 2.0
 alpha: 0.3
 
+# Already at batch_size 1, the floor, so unlike the 1.5B sequence config
+# there's no further room to trade batch_size for gradient_accumulation_steps
+# here. Fitting this cell relies on gradient checkpointing in the sequence
+# trainer itself (see src/sequence_trainer.py).
 batch_size: 1
 gradient_accumulation_steps: 16
 max_length: 512

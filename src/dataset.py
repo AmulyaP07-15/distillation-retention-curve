@@ -117,12 +117,19 @@ TEACHER_PER_TOKEN_COLUMNS = {
 }
 
 
-def load_teacher_logits(manifest: dict) -> pd.DataFrame:
+def load_teacher_logits(manifest: dict, include_per_token_columns: bool = True) -> pd.DataFrame:
     """
     Load teacher_logits.parquet and normalize every list/array column once,
     at the read boundary, so every downstream reader (training datasets,
     fidelity eval, sequence distillation) gets clean, consistently-typed
     values and never has to know about parquet's round-trip quirks itself.
+
+    include_per_token_columns=False drops top_logit_indices/top_logit_values
+    entirely instead of normalizing them. Sequence-level distillation trains
+    on generated_ids alone and never reads the teacher's top-k logits, so
+    stacking and dtype-casting a (seq_len, top_k) array per row for every
+    row in the dataset would just be host-memory and CPU work spent on data
+    nothing downstream touches.
     """
     df = pd.read_parquet(manifest["teacher_logits"]["path"])
 
@@ -130,8 +137,12 @@ def load_teacher_logits(manifest: dict) -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].apply(list)
 
-    for col, dtype in TEACHER_PER_TOKEN_COLUMNS.items():
-        if col in df.columns:
-            df[col] = df[col].apply(lambda cell, dtype=dtype: np.stack(cell).astype(dtype))
+    if include_per_token_columns:
+        for col, dtype in TEACHER_PER_TOKEN_COLUMNS.items():
+            if col in df.columns:
+                df[col] = df[col].apply(lambda cell, dtype=dtype: np.stack(cell).astype(dtype))
+    else:
+        drop_cols = [col for col in TEACHER_PER_TOKEN_COLUMNS if col in df.columns]
+        df = df.drop(columns=drop_cols)
 
     return df

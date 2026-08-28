@@ -94,7 +94,9 @@ def test_fidelity_padding_and_top_k_tensors_survive_the_roundtrip(tmp_path):
 
 def test_sequence_dataset_reads_generated_ids_after_roundtrip(tmp_path):
     manifest = make_teacher_logits_parquet(tmp_path)
-    df = load_teacher_logits(manifest)
+    # Matches how sequence_trainer.py actually loads this data: it never
+    # reads the teacher's top-k logits, only input_ids/generated_ids.
+    df = load_teacher_logits(manifest, include_per_token_columns=False)
 
     dataset = SequenceDistillationDataset(df, tokenizer=None, max_length=512)
     batch = [dataset[0], dataset[1]]
@@ -102,3 +104,21 @@ def test_sequence_dataset_reads_generated_ids_after_roundtrip(tmp_path):
 
     assert padded["input_ids"].shape[0] == 2
     assert padded["labels"].shape == padded["input_ids"].shape
+
+
+def test_include_per_token_columns_false_drops_top_k_columns(tmp_path):
+    manifest = make_teacher_logits_parquet(tmp_path)
+    df = load_teacher_logits(manifest, include_per_token_columns=False)
+
+    assert "top_logit_indices" not in df.columns
+    assert "top_logit_values" not in df.columns
+    assert "input_ids" in df.columns
+    assert "generated_ids" in df.columns
+
+
+def test_include_per_token_columns_true_is_still_the_default(tmp_path):
+    manifest = make_teacher_logits_parquet(tmp_path)
+    df = load_teacher_logits(manifest)
+
+    assert "top_logit_indices" in df.columns
+    assert "top_logit_values" in df.columns
