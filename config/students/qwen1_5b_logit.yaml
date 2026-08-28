@@ -6,9 +6,12 @@ temperature: 2.0
 alpha: 0.3
 
 # Smaller micro-batch than the 0.5B config, larger accumulation to keep the
-# same effective batch size of 16, so the larger student still fits in memory.
-batch_size: 2
-gradient_accumulation_steps: 8
+# same effective batch size of 16. The 1.5B logit cell peaked at 32.63GB on a
+# 32GB V100 at batch_size 2, right at the card's limit, so this is lowered
+# further to batch_size 1. Paired with gradient checkpointing in the logit
+# trainer itself (src/trainer.py).
+batch_size: 1
+gradient_accumulation_steps: 16
 max_length: 512
 num_epochs: 3
 learning_rate: 2.0e-5

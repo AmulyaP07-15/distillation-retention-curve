@@ -5,8 +5,11 @@ student_model: "Qwen/Qwen2.5-3B-Instruct"
 temperature: 2.0
 alpha: 0.3
 
-# Smallest micro-batch of the three students, largest accumulation, same
-# effective batch size of 16.
+# Already at batch_size 1, the floor, so there's no further room to trade
+# batch_size for gradient_accumulation_steps here (same situation as the 3B
+# sequence config). With the 1.5B logit cell already peaking at 32.63GB at
+# batch_size 2, this cell fitting relies on gradient checkpointing in the
+# logit trainer itself (src/trainer.py).
 batch_size: 1
 gradient_accumulation_steps: 16
 max_length: 512

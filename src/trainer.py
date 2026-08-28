@@ -131,6 +131,15 @@ def train(rank: int, config: Config, world_size: int):
         torch_dtype=torch.float32,
     ).to(device)
 
+    # Trades recompute for memory: only checkpoints are kept from the forward
+    # pass, and each layer's activations are recomputed during backward
+    # instead of all being held at once. Same fix applied to the sequence
+    # trainer, needed here too since the 1.5B/3B logit cells were peaking
+    # at or past the 32GB card's limit. use_cache is for generation-time KV
+    # caching and doesn't apply to a training forward pass, so disable it.
+    model.gradient_checkpointing_enable()
+    model.config.use_cache = False
+
     if use_ddp:
         model = DDP(model, device_ids=[rank])
 
