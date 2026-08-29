@@ -52,6 +52,27 @@ def read_latest_eval(run_log_path: str) -> dict:
     }
 
 
+def merge_rows(out_path: Path, new_rows: list[dict]) -> pd.DataFrame:
+    """
+    Merge new_rows into whatever table already lives at out_path, keyed on
+    (student, signal). A --students/--signals subset run only produces rows
+    for the cells it touched, so writing new_rows alone would silently drop
+    every other cell's results from the CSV. Existing rows for the same
+    (student, signal) are replaced with the freshly computed ones; rows for
+    cells not in this run are carried over untouched.
+    """
+    new_table = pd.DataFrame(new_rows)
+
+    if not out_path.exists():
+        return new_table
+
+    existing = pd.read_csv(out_path)
+    keep_mask = ~existing.set_index(["student", "signal"]).index.isin(
+        new_table.set_index(["student", "signal"]).index
+    )
+    return pd.concat([existing[keep_mask], new_table], ignore_index=True)
+
+
 def run_teacher_step(teacher_config_path: str):
     """
     Build the shared dataset + teacher logits as a subprocess, not an
@@ -131,10 +152,9 @@ def main():
         print("Nothing matched the requested --students/--signals filter.")
         return
 
-    table = pd.DataFrame(rows)
-
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    table = merge_rows(out_path, rows)
     table.to_csv(out_path, index=False)
 
     print("\n=== Phase 2 grid (student x signal) ===")

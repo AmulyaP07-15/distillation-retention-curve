@@ -1,6 +1,8 @@
 import json
 
-from run_phase2_grid import read_latest_eval
+import pandas as pd
+
+from run_phase2_grid import merge_rows, read_latest_eval
 
 
 def write_log(path, entries):
@@ -45,3 +47,28 @@ def test_ignores_non_eval_entries(tmp_path):
 
     metrics = read_latest_eval(str(log_path))
     assert metrics == {}
+
+
+def test_merge_rows_with_no_existing_csv_returns_new_rows(tmp_path):
+    out_path = tmp_path / "phase2_grid.csv"
+    new_rows = [{"student": "qwen3b", "signal": "logit", "top1_agreement": 0.9}]
+
+    table = merge_rows(out_path, new_rows)
+
+    assert table.to_dict("records") == new_rows
+
+
+def test_merge_rows_keeps_untouched_cells_and_replaces_matching_ones(tmp_path):
+    out_path = tmp_path / "phase2_grid.csv"
+    pd.DataFrame(
+        [
+            {"student": "qwen0_5b", "signal": "logit", "top1_agreement": 0.1},
+            {"student": "qwen3b", "signal": "logit", "top1_agreement": 0.5},
+        ]
+    ).to_csv(out_path, index=False)
+
+    new_rows = [{"student": "qwen3b", "signal": "logit", "top1_agreement": 0.9}]
+    table = merge_rows(out_path, new_rows)
+
+    by_cell = {(r["student"], r["signal"]): r["top1_agreement"] for r in table.to_dict("records")}
+    assert by_cell == {("qwen0_5b", "logit"): 0.1, ("qwen3b", "logit"): 0.9}
