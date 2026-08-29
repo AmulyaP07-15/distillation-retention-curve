@@ -48,6 +48,10 @@ def read_latest_eval(run_log_path: str) -> dict:
         "top1_agreement": latest["fidelity"]["top1_agreement"],
         "kl_divergence": latest["fidelity"]["kl_divergence"],
         "token_f1": latest["capability"]["token_f1"],
+        # .get(): older run logs (pre chat-template fix) don't have these
+        # capability fields, so a mixed rebuild shouldn't KeyError on them.
+        "rouge_l": latest["capability"].get("rouge_l"),
+        "bertscore_f1": latest["capability"].get("bertscore_f1"),
         "ground_truth_perplexity": latest["capability"]["ground_truth_perplexity"],
     }
 
@@ -115,6 +119,15 @@ def main():
         help="Only re-read existing run logs and rebuild the table, without training or re-evaluating",
     )
     parser.add_argument(
+        "--eval-only",
+        action="store_true",
+        help=(
+            "Re-run eval (fidelity + capability) against each cell's existing checkpoint without "
+            "retraining or rerunning the teacher pass, then rebuild the table. Use this to re-score "
+            "capability after an eval-only change (e.g. a metric fix) without touching checkpoints."
+        ),
+    )
+    parser.add_argument(
         "--skip-teacher",
         action="store_true",
         help="Skip the upfront teacher pass entirely (use existing data/ as-is, no hash check)",
@@ -124,7 +137,7 @@ def main():
 
     from src.config import load_config
 
-    if not args.skip_teacher and not args.skip_training:
+    if not args.skip_teacher and not args.skip_training and not args.eval_only:
         # All 6 configs share teacher_model/dataset_name/num_samples/split_a_ratio/
         # seed/top_k_logits/max_length, so any one of them can build the shared
         # dataset + teacher_logits.parquet that every cell below reads from. This
@@ -142,7 +155,10 @@ def main():
 
         config = load_config(config_path)
 
-        if not args.skip_training:
+        if args.eval_only:
+            print(f"=== Re-scoring {student} / {signal} (eval only, existing checkpoint) ===")
+            subprocess.run([sys.executable, "run_eval.py", "--config", config_path], check=True, env=SUBPROCESS_ENV)
+        elif not args.skip_training:
             run_cell(student, signal, config_path, skip_training=False)
 
         metrics = read_latest_eval(config.run_log)

@@ -137,6 +137,8 @@ def run_eval(config: Config):
     print()
     print("=== Capability Results (Split B, vs ground truth) ===")
     print(f"Token F1 vs Reference        : {capability_metrics['token_f1']:.4f}")
+    print(f"ROUGE-L F1 vs Reference      : {capability_metrics['rouge_l']:.4f}")
+    print(f"BERTScore F1 vs Reference    : {capability_metrics['bertscore_f1']:.4f}")
     print(f"Ground-Truth Perplexity      : {capability_metrics['ground_truth_perplexity']:.4f}")
 
     run_log_path = Path(config.run_log)

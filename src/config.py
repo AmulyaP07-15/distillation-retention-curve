@@ -22,6 +22,7 @@ class Config:
     split_a_ratio: float = 0.5
     top_k_logits: int = 1000
     capability_eval_samples: int = 200
+    max_new_tokens: int = 256
     num_gpus: int = 1
     device: str = "cuda"
     run_log: str = "runs/run_log.jsonl"

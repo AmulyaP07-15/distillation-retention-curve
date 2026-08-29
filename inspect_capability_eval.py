@@ -2,12 +2,12 @@ import argparse
 from pathlib import Path
 
 import torch
+from bert_score import score as bert_score_fn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.capability import normalize_text, token_f1
+from src.capability import build_chat_prompt, resolve_generation_eos_token_id, rouge_l_f1, token_f1
 from src.config import load_config
 from src.dataset import load_manifest, load_split
-from src.prompts import format_prompt
 
 
 def select_samples(split_b_df, config, num_samples: int):
@@ -23,7 +23,7 @@ def select_samples(split_b_df, config, num_samples: int):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Print real (prompt, student_generation, reference) triples from the capability eval"
+        description="Print real (prompt, student_generation, reference, metrics) tuples from the capability eval"
     )
     parser.add_argument("--config", required=True, help="Path to a student YAML config")
     parser.add_argument("--num-samples", type=int, default=5)
@@ -49,11 +49,20 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(str(latest_checkpoint), torch_dtype=torch.float32).to(device)
     model.eval()
 
-    for i, row in enumerate(rows):
-        prompt = format_prompt(row)
+    eos_token_id = resolve_generation_eos_token_id(tokenizer)
+
+    prompts = []
+    generations = []
+    references = []
+    hit_caps = []
+
+    for row in rows:
+        prompt = build_chat_prompt(row, tokenizer)
         reference = row.get("output", "")
 
-        encoded = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=config.max_length)
+        encoded = tokenizer(
+            prompt, return_tensors="pt", truncation=True, max_length=config.max_length, add_special_tokens=False
+        )
         input_ids = encoded["input_ids"].to(device)
         attention_mask = encoded["attention_mask"].to(device)
 
@@ -61,23 +70,37 @@ def main():
             generated = model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                max_new_tokens=128,
+                max_new_tokens=config.max_new_tokens,
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=eos_token_id,
             )
 
         new_tokens = generated[0, input_ids.shape[1]:]
         generation = tokenizer.decode(new_tokens, skip_special_tokens=True)
-        hit_token_cap = new_tokens.shape[0] >= 128
 
-        f1 = token_f1(generation, reference)
+        prompts.append(prompt)
+        generations.append(generation)
+        references.append(reference)
+        hit_caps.append(new_tokens.shape[0] >= config.max_new_tokens)
 
-        print(f"--- Sample {i} (F1={f1:.4f}, hit_128_token_cap={hit_token_cap}) ---")
-        print(f"PROMPT:\n{prompt}")
-        print(f"\nSTUDENT GENERATION ({new_tokens.shape[0]} tokens):\n{generation}")
-        print(f"\nREFERENCE (row['output']):\n{reference}")
-        print(f"\nnormalized pred tokens : {normalize_text(generation)[:20]}")
-        print(f"normalized ref tokens  : {normalize_text(reference)[:20]}")
+    # Batched once over all printed samples rather than per-sample, same
+    # reasoning as compute_capability: bert_score's scoring model only
+    # needs to load once.
+    _, _, bertscore_f1s = bert_score_fn(generations, references, lang="en", verbose=False)
+
+    for i in range(len(rows)):
+        f1 = token_f1(generations[i], references[i])
+        rouge_l = rouge_l_f1(generations[i], references[i])
+        bertscore = bertscore_f1s[i].item()
+
+        print(
+            f"--- Sample {i} (token_f1={f1:.4f}, rougeL={rouge_l:.4f}, bertscore={bertscore:.4f}, "
+            f"hit_max_cap={hit_caps[i]}) ---"
+        )
+        print(f"PROMPT:\n{prompts[i]}")
+        print(f"\nSTUDENT GENERATION:\n{generations[i]}")
+        print(f"\nREFERENCE (row['output']):\n{references[i]}")
         print()
 
 
