@@ -1,0 +1,24 @@
+# Named deployment budgets RECIPE.md is generated against. Thresholds are
+# ceilings (a variant must be <= each one to qualify); leave a field out or
+# null to leave that axis unconstrained. Tuned around the T4 measurement
+# config's ~70W edge-inference framing (config/phase3_measurement_t4.yaml).
+budgets:
+  - name: "edge tight"
+    description: "Hard real-time edge caller, single T4, battery/thermal constrained"
+    max_p50_ms_per_token: 50
+    max_peak_memory_gb: 2
+    max_joules_per_token: 1.0
+    max_avg_power_w: 70
+
+  - name: "edge moderate"
+    description: "Edge inference with some latency slack, still one T4"
+    max_p50_ms_per_token: 150
+    max_peak_memory_gb: 4
+    max_joules_per_token: null
+    max_avg_power_w: 70
+
+  - name: "server relaxed"
+    description: "Latency-tolerant server deployment, memory is the only real limit"
+    max_p50_ms_per_token: null
+    max_peak_memory_gb: 24
+    max_joules_per_token: null

@@ -56,24 +56,25 @@ def read_latest_eval(run_log_path: str) -> dict:
     }
 
 
-def merge_rows(out_path: Path, new_rows: list[dict]) -> pd.DataFrame:
+def merge_rows(out_path: Path, new_rows: list[dict], key_cols: list[str] = None) -> pd.DataFrame:
     """
     Merge new_rows into whatever table already lives at out_path, keyed on
-    (student, signal). A --students/--signals subset run only produces rows
-    for the cells it touched, so writing new_rows alone would silently drop
-    every other cell's results from the CSV. Existing rows for the same
-    (student, signal) are replaced with the freshly computed ones; rows for
-    cells not in this run are carried over untouched.
+    key_cols (default: student, signal). A --students/--signals subset run
+    only produces rows for the cells it touched, so writing new_rows alone
+    would silently drop every other cell's results from the CSV. Existing
+    rows with the same key are replaced with the freshly computed ones;
+    rows for cells not in this run are carried over untouched. Phase 3
+    reuses this with key_cols=["student", "signal", "quant"] since it has
+    one extra grid dimension.
     """
+    key_cols = key_cols or ["student", "signal"]
     new_table = pd.DataFrame(new_rows)
 
     if not out_path.exists():
         return new_table
 
     existing = pd.read_csv(out_path)
-    keep_mask = ~existing.set_index(["student", "signal"]).index.isin(
-        new_table.set_index(["student", "signal"]).index
-    )
+    keep_mask = ~existing.set_index(key_cols).index.isin(new_table.set_index(key_cols).index)
     return pd.concat([existing[keep_mask], new_table], ignore_index=True)
 
 

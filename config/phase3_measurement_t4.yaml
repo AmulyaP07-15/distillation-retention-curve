@@ -1,0 +1,19 @@
+# Fixed device for every Phase 3 latency/memory/power number: NVIDIA T4
+# (~70W edge-inference card). Every quant variant of every student is
+# measured on this one card, same batch/seq settings, so the numbers on
+# the cost axis are comparable across the whole grid.
+gpu_name: "NVIDIA T4"
+device: "cuda"
+
+# Shared dataset dir the fixed prompt set is drawn from (same alpaca split_b
+# used by the capability eval), independent of any one student's own
+# capability_eval_samples/seed so every quant variant of every student sees
+# the exact same prompts.
+data_dir: "data"
+measure_seed: 123
+num_warmup_prompts: 5
+num_measured_prompts: 30
+
+max_new_tokens: 128
+batch_size: 1
+power_sample_interval_s: 0.05
